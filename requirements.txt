@@ -1,0 +1,8 @@
+flake8==5.0.4
+loguru==0.6.0
+requests==2.28.1
+python-dotenv-1.0.0
+SQLAlchemy==2.0.4
+datasette==0.59
+sqlite-utils==3.17.1
+
