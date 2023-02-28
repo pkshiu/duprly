@@ -10,7 +10,7 @@ class Player:
         self.id = None
         self.dupr_id = ""
         self.full_name = ""
-        self.image_url = ""        
+        self.image_url = ""
         self.email = ""
         self.gender = ""
         self.age = 0
@@ -111,7 +111,7 @@ class Match:
         self.confirmed = d.get("confirmed")
         self.event_date = date.fromisoformat(d.get("eventDate"))
         self.event_format = d.get("eventFormat")
-        self.match_score_added = d.get("matchScoreAdded")        
+        self.match_score_added = d.get("matchScoreAdded")
         self.match_source = d.get("matchSource")
         self.match_type = d.get("matchType")        
 

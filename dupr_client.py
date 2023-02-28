@@ -4,7 +4,7 @@ from loguru import logger
 import json
 
 """
-    see 
+    see
     https://api.dupr.gg/swagger-ui/index.html#/Club/getAllMembersUsingPOST
 
 """
@@ -139,7 +139,7 @@ class DuprClient(object):
                 logger.debug(f'return: {r.status_code}')
         self.failed = r.status_code != 200
         return r
-    
+
     def dupr_post(self, url, json_data=None, name: str = ""):
         logger.debug(f'POST: {name} : {url}')
         headers = self.headers()
