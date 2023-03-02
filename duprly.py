@@ -26,92 +26,74 @@ def dupr_auth():
     password = os.getenv("DUPR_PASSWORD")
     dupr.auth_user(username, password)
 
-
-@click.command()
-def get_all_players():
-    dupr_auth()
-
-    club_id = os.getenv("DUPR_CLUB_ID")
-    rc, players = dupr.get_members_by_club(club_id)
-    for pdata in players:
-        # rc, matches = dupr.get_member_match_history_p(p["id"])
-        # look_at_matches(matches)
-        with Session(eng) as sess:
-            player = Player().from_json(pdata)
-            logger.debug(f"{player.id}, {player.full_name}, {player.rating}")
-
-            p = sess.execute(select(Player).where(
-                Player.dupr_id==player.dupr_id)).scalar_one_or_none()
-            if p:
-                # update
-                p.from_json(pdata)
-                player = p
-
-            sess.add_all([player, ])
-            sess.commit()
-
-
-@click.command()
-@click.argument("pid")
-def get_player(pid: int) -> Player:
-    """ Get player from DUPR by ID """
+def get_player_from_dupr(pid: int) -> Player:
     dupr_auth()
 
     rc, pdata = dupr.get_player(pid)
     logger.debug(f"dupr.get_player for id {pid} GET...")
-    logger.debug(pdata)
+    ppj(pdata)
+
+    player = None
+
+    with Session(eng) as sess:
+        player = Player().from_json(pdata)
+        logger.debug(f"{player.dupr_id}, {player.full_name}, {player.rating}")
+        player.save(sess)
+        sess.commit()
+
+    return player
+
+def get_all_players_from_dupr():
+    dupr_auth()
+
+    club_id = os.getenv("DUPR_CLUB_ID")
+    _rc, players = dupr.get_members_by_club(club_id)
+    for pdata in players:
+        with Session(eng) as sess:
+            player = Player().from_json(pdata)
+            logger.debug(f"{player.id}, {player.full_name}, {player.rating}")
+            player.save(sess)
+            sess.commit()
+
+
+def get_matches_from_dupr(dupr_id: int):
+    """ Get match history for specified player """
+
+    dupr_auth()
+    _rc, matches = dupr.get_member_match_history_p(dupr_id)
 
     with Session(eng) as sess:
 
-        player = Player().from_json(pdata)
-        logger.debug(f"{player.dupr_id}, {player.full_name}, {player.rating}")
+        for mdata in matches:
+            print("match")
+            ppj(mdata)
+            m = Match().from_json(mdata)
+            # now we have match, and potentially four new players
+            # deal with the fact that player may already exists
+            m1 = Match.get_by_id(sess, m.match_id)
+            if m1:
+                # update
+                continue  # skip
 
-        p = sess.execute(select(Player).where(
-                Player.dupr_id==player.dupr_id)).scalar_one_or_none()
-        if p:
-            # update
-            p.from_json(pdata)
-            player = p
-
-        sess.add_all([player, ])
-        sess.commit()
-
-    # logger.info(f"Getting match history")
-    # dupr.get_member_match_history_p(pid)
-    return player
-
-
-def look_at_matches(matches: list):
-
-    q = Query()
-    for m in matches:
-        print(m)
-        print(m["matchId"])
-        print(type(m["matchId"]))
-        mtable.upsert(m, q.matchId == int(m["matchId"]))
-
-        # do we need to pull player data?
-        match = Match().from_json(m)
-        dupr_add_new_player(match.team1().player1.id)
-        dupr_add_new_player(match.team2().player1.id)
-        if match.is_double():
-            dupr_add_new_player(match.team1().player2.id)
-            dupr_add_new_player(match.team2().player2.id)
-
-    print(len(matches))
-
-
-
-@click.command()
-def get_data():
-    """ Update all data """
-    logger.info("Getting data from DUPR...")
-
-    get_all_players()
-    players = []
-    for p in players:
-        rc, matches = dupr.get_member_match_history_p(p["id"])
-        look_at_matches(matches)
+            for team in m.teams:
+                print(f"team {team}")
+                plist = []
+                for p in team.players:
+                    # This is very kludgy, the player data returned from the MatchHistory
+                    # call only has a few fields
+                    p1 = sess.execute(select(Player).where(
+                        Player.dupr_id == p.dupr_id)).scalar_one_or_none()
+                    if p1:
+                        # set team to this player object instead
+                        plist.append(p1)
+                        print(f"use existing populated player")
+                    else:
+                        plist.append(p)
+                        print(f"saved new limited data player")
+                team.players = plist
+            sess.add(m)
+            sess.commit()
+            continue
 
 
 def match_row(m: Match) -> tuple:
@@ -141,15 +123,16 @@ def write_excel():
     player_ratings = {}
 
     ws.append(("id", "DUPR id", "full name", "gender", "age") +
-                ("single", "single verified", "single provisional") +
-                ("double", "double verified", "double provisional")
-            )
+              ("single", "single verified", "single provisional") +
+              ("double", "double verified", "double provisional")
+              )
 
     for d in ptable:
         p = Player().from_json(d)
-        ws.append((p.id, p.dupr_id, p.full_name, p.gender, p.age,
-        p.singles, p.singles_verified, p.singles_provisional,
-        p.doubles, p.doubles_verified, p.doubles_provisional))
+        ws.append((
+            p.id, p.dupr_id, p.full_name, p.gender, p.age,
+            p.singles, p.singles_verified, p.singles_provisional,
+            p.doubles, p.doubles_verified, p.doubles_provisional))
         player_ratings[p.id] = (p.singles, p.singles_verified, p.doubles, p.doubles_verified)
 
     col = ws.column_dimensions['A']
@@ -168,7 +151,6 @@ def write_excel():
         t2 = m.teams[1]
         ws.append((match_row(m) + team_row(m.teams[0], player_ratings) +
                     team_row(m.teams[1], player_ratings)))
-
 
     col = ws.column_dimensions['A']
     col.number_format = u'#,##0'
@@ -193,26 +175,7 @@ def stats():
 @click.argument("pid")
 def get_player(pid: int) -> Player:
     """ Get player from DUPR by ID """
-    dupr_auth()
-
-    rc, pdata = dupr.get_player(pid)
-    logger.debug(f"dupr.get_player for id {pid} GET...")
-    logger.debug(pdata)
-
-    with Session(eng) as sess:
-
-        player = Player().from_json(pdata)
-        logger.debug(f"{player.dupr_id}, {player.full_name}, {player.rating}")
-
-        p = sess.execute(select(Player).where(
-                Player.dupr_id==player.dupr_id)).scalar_one_or_none()
-        if p:
-            # update
-            p.from_json(pdata)
-            player = p
-
-        sess.add_all([player,])
-        sess.commit()
+    player = get_player_from_dupr(pid)
 
     # logger.info(f"Getting match history")
     # dupr.get_member_match_history_p(pid)
@@ -229,14 +192,37 @@ def delete_player(pid: int):
 
 @click.command()
 def test_db():
-    from dupr_db import open_db, Base, Player, Match, MatchTeam
+    open_db()
+    with Session(eng) as sess:
+        # Has to use "has" not "any" because it is 1=1? Also need to have something
+        # in the has() function
+        players = sess.execute(select(Player).where(
+            ~Player.rating.has(Rating.doubles))).scalars()
+        for p in players:
+            get_player_from_dupr(p.dupr_id)
 
-    e = open_db()
-    with Session(e) as sess:
-        Base.metadata.create_all(e)
+@click.command()
+def get_all_players():
+    get_all_players_from_dupr()
 
-        print(type(Player))
-        p = Player(dupr_id=123, full_name="Mr Smith")
+
+@click.command()
+@click.argument("dupr_id")
+def get_matches(dupr_id: int):
+    """ Get match history for specified player """
+    get_matches_from_dupr(dupr_id)
+
+
+@click.command()
+def get_data():
+    """ Update all data """
+    logger.info("Getting data from DUPR...")
+
+    get_all_players_from_dupr()
+    with Session(eng) as sess:
+        for p in sess.execute(select(Player)).scalars():
+            print(type(p))
+            get_matches_from_dupr(p.dupr_id)
 
 
 @click.group()
@@ -249,7 +235,9 @@ if __name__ == "__main__":
     cli.add_command(get_data)
     cli.add_command(write_excel)
     cli.add_command(stats)
+    cli.add_command(get_all_players)
     cli.add_command(get_player)
     cli.add_command(delete_player)
+    cli.add_command(get_matches)
     cli.add_command(test_db)
     cli()

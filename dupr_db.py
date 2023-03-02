@@ -7,7 +7,7 @@ from typing import List, Optional
 from loguru import logger
 from sqlalchemy import create_engine
 from sqlalchemy import String, ForeignKey, Integer, Float
-from sqlalchemy import Table, Column
+from sqlalchemy import Table, Column, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -18,8 +18,9 @@ engine = None
 
 def open_db():
     global engine
-    engine = create_engine("sqlite+pysqlite:///:memory:", echo=False)
+    # engine = create_engine("sqlite+pysqlite:///:memory:", echo=False)
     engine = create_engine("sqlite+pysqlite:///dupr.sqlite", echo=False)
+    Base.metadata.create_all(engine)
     return engine
 
 
@@ -40,6 +41,8 @@ def _fix_rating_json(data: dict) -> dict:
 
 def _cv_rating_json(s: str):
     # deal with NR vs 3.45
+    if s is None:
+        return None
     if s == "NR": return None
     return float(s)
 
@@ -65,7 +68,7 @@ class Rating(Base):
             v = f"{s}*" if s else "NR"
             return v
         else:
-            v = f"{s_verified}" if s_verified else s # "NR"
+            v = f"{s_verified}" if s_verified else s  # "NR"
             return v
 
     def singles_rating(self):
@@ -107,6 +110,20 @@ class Player(Base):
     def __repr__(self) -> str:
         return f"Player {self.full_name} {self.rating}"
 
+    def save(this, sess: Session) -> "Player":
+        """ Insert or update this player
+            Deal with child objects
+        """
+        p = sess.execute(select(Player).where(
+            Player.dupr_id == this.dupr_id)).scalar_one_or_none()
+        if p:
+            # update
+            sess.add(p)
+            return p
+        else:
+            sess.add(this)
+            return this
+
     @classmethod
     def from_json(cls, d: dict) -> 'Player':
         try:
@@ -115,6 +132,10 @@ class Player(Base):
             p.dupr_id = d.get("duprId")
             if not p.dupr_id:
                 p.dupr_id = d.get("id")
+            # There seems to a API bug where player in matches
+            # return a different DuprID in the form of NNNANNN where as
+            # other IDs are just numeric. So stick to id field
+            p.dupr_id = d.get("id")
             p.full_name = d.get("fullName")
             p.image_url = d.get("imageUrl")
 
@@ -126,12 +147,12 @@ class Player(Base):
 
             _fix_rating_json(d)
             p.rating.singles = _cv_rating_json(d.get("singles"))
-            p.rating.singlesVerified = _cv_rating_json(d.get("singlesVerified"))
-            p.rating.singlesProvisional = d.get("singlesProvisional")
+            p.rating.singles_verified = _cv_rating_json(d.get("singlesVerified"))
+            p.rating.is_singles_provisional = d.get("singlesProvisional")
 
             p.rating.doubles = _cv_rating_json(d.get("doubles"))
-            p.rating.doublesVerified = _cv_rating_json(d.get("doublesVerified"))
-            p.rating.doublesProvisional = d.get("doublesProvisional")
+            p.rating.doubles_verified = _cv_rating_json(d.get("doublesVerified"))
+            p.rating.is_doubles_provisional = d.get("doublesProvisional")
             return p
         except:
             logger.exception(d)
@@ -142,12 +163,52 @@ class Match(Base):
     __tablename__ = "match"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column()
     name: Mapped[str] = mapped_column(String(246))
     date: Mapped[str] = mapped_column(String(16))
     teams: Mapped[List["MatchTeam"]] = relationship(back_populates="match")
+    match_type: Mapped[str] = mapped_column(default="")
+    match_source: Mapped[str] = mapped_column(default="")
+    match_score_added: Mapped[bool] = mapped_column(default=True)
 
     def __repr__(self) -> str:
         return f"Match {self.name} on {self.date}"
+
+    @classmethod
+    def get_by_id(cls, sess: Session, match_id: int) -> "Match":
+        m = sess.execute(select(Match).where(
+            Match.match_id == match_id)).scalar_one_or_none()
+        return m
+
+    @classmethod
+    def from_json(cls, d: dict):
+
+        try:
+            m = Match()
+            m.match_id = d.get("matchId")
+            m.user_id = d.get("userId")
+            m.display_identity = d.get("displayIdentity")
+            m.confirmed = d.get("confirmed")
+            m.date = date.fromisoformat(d.get("eventDate"))
+            # need to try different fields...
+            m.name = d.get("eventName")
+            if not m.name:
+                m.name = d.get("league")
+            if not m.name:
+                m.name = d.get("tournament", "")
+            m.event_format = d.get("eventFormat")
+            m.match_score_added = d.get("matchScoreAdded")
+            m.match_source = d.get("matchSource")
+            m.match_type = d.get("matchType")
+
+            for jt in d.get("teams"):
+                t = MatchTeam().from_json(jt)
+                m.teams.append(t)
+            return m
+
+        except:
+            logger.exception(d)
+            raise
 
 
 match_team_player = Table(
@@ -177,78 +238,23 @@ class MatchTeam(Base):
         ps = ",".join([p.full_name for p in self.players])
         return f"Match Team {ps}"
 
+    @classmethod
+    def from_json(cls, d: dict):
 
-
-
-class Teamx:
-    def __init__(self):
-        self.game_score1 = -1
-        self.game_score2 = -1
-        self.game_score3 = -1
-        self.winner = False
-        self.player1 = None
-        self.player2 = None
-
-    def from_json(self, d: dict) -> 'Team':
         try:
-            self.game_score1 = d.get("game1")
-            self.game_score2 = d.get("game2")
-            self.game_score3 = d.get("game3")
-            self.player1 = Player().from_json(d.get("player1"))
-            p2 = d.get("player2")
-            if p2:
-                self.player2 = Player().from_json(d.get("player2"))
-            self.winner = d.get("winner")
-            return self
+            mt = MatchTeam()
+            mt.score1 = d.get("game1")
+            mt.score2 = d.get("game2")
+            mt.score3 = d.get("game3")
+            p = Player().from_json(d.get("player1"))
+            mt.players.append(p)
+            pdata = d.get("player2")
+            if pdata:
+                p2 = Player().from_json(pdata)
+                mt.players.append(p2)
+            mt.is_winner = d.get("winner")
+            return mt
+
         except:
             logger.exception(d)
-            print(d)
             raise
-
-
-class Matchx:
-    def __init__(self):
-        self.id = 0
-        self.match_id = 0
-        self.user_id = 0
-        self.display_identity = ""
-        self.event_date = None
-        self.confirmed = False
-        self.event_format = ""
-        self.match_score_added = False
-        self.match_source = None  # dupr, manual, league
-        self.match_type = None  # side_only vs rally
-
-        self.teams = []
-
-    def team1(self):
-        if self.teams[0]:
-            return self.teams[0]
-
-    def team2(self):
-        if self.teams[1]:
-            return self.teams[1]
-
-    def is_double(self):
-        return self.event_format == "DOUBLES"  # not "SINGLES"
-
-    def __repr__(self):
-        t = self.team1()
-        s = f"player1: {t.player1}"
-        return s
-
-    def from_json(self, d: dict) -> 'Match':
-        self.match_id = d.get("matchId")
-        self.user_id = d.get("userId")
-        self.display_identity = d.get("displayIdentity")
-        self.confirmed = d.get("confirmed")
-        self.event_date = date.fromisoformat(d.get("eventDate"))
-        self.event_format = d.get("eventFormat")
-        self.match_score_added = d.get("matchScoreAdded")        
-        self.match_source = d.get("matchSource")
-        self.match_type = d.get("matchType")        
-
-        for jt in d.get("teams"):
-            t = Team().from_json(jt)
-            self.teams.append(t)
-        return self
