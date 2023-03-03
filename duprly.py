@@ -26,8 +26,8 @@ def dupr_auth():
     password = os.getenv("DUPR_PASSWORD")
     dupr.auth_user(username, password)
 
+
 def get_player_from_dupr(pid: int) -> Player:
-    dupr_auth()
 
     rc, pdata = dupr.get_player(pid)
     logger.debug(f"dupr.get_player for id {pid} GET...")
@@ -38,28 +38,26 @@ def get_player_from_dupr(pid: int) -> Player:
     with Session(eng) as sess:
         player = Player().from_json(pdata)
         logger.debug(f"{player.dupr_id}, {player.full_name}, {player.rating}")
-        player.save(sess)
+        Player.save(sess, player)
         sess.commit()
 
     return player
 
-def get_all_players_from_dupr():
-    dupr_auth()
 
+def get_all_players_from_dupr():
     club_id = os.getenv("DUPR_CLUB_ID")
     _rc, players = dupr.get_members_by_club(club_id)
     for pdata in players:
         with Session(eng) as sess:
             player = Player().from_json(pdata)
             logger.debug(f"{player.id}, {player.full_name}, {player.rating}")
-            player.save(sess)
+            Player.save(sess, player)
             sess.commit()
 
 
 def get_matches_from_dupr(dupr_id: int):
     """ Get match history for specified player """
 
-    dupr_auth()
     _rc, matches = dupr.get_member_match_history_p(dupr_id)
 
     with Session(eng) as sess:
@@ -93,7 +91,18 @@ def get_matches_from_dupr(dupr_id: int):
                 team.players = plist
             sess.add(m)
             sess.commit()
-            continue
+
+
+def update_ratings_from_dupr():
+
+    with Session(eng) as sess:
+        # Has to use "has" not "any" because it is 1=1? Also need to have something
+        # in the has() function
+        dupr_ids = sess.scalars(select(Player.dupr_id).where(
+            ~Player.rating.has(Rating.doubles)))
+
+    for i in dupr_ids:
+        get_player_from_dupr(i)
 
 
 def match_row(m: Match) -> tuple:
@@ -173,13 +182,10 @@ def stats():
 
 @click.command()
 @click.argument("pid")
-def get_player(pid: int) -> Player:
+def get_player(pid: int):
     """ Get player from DUPR by ID """
-    player = get_player_from_dupr(pid)
-
-    # logger.info(f"Getting match history")
-    # dupr.get_member_match_history_p(pid)
-    return player
+    dupr_auth()
+    get_player_from_dupr(pid)
 
 
 @click.command()
@@ -191,18 +197,27 @@ def delete_player(pid: int):
 
 
 @click.command()
+def update_ratings():
+    dupr_auth()
+    update_ratings_from_dupr()
+
+
+@click.command()
 def test_db():
-    open_db()
+    dupr_auth()
     with Session(eng) as sess:
         # Has to use "has" not "any" because it is 1=1? Also need to have something
         # in the has() function
-        players = sess.execute(select(Player).where(
-            ~Player.rating.has(Rating.doubles))).scalars()
-        for p in players:
-            get_player_from_dupr(p.dupr_id)
+        # use sess.scalars instead of execute(...).scalars() for more concise use
+        dupr_ids = sess.scalars(select(Player.dupr_id).where(
+            ~Player.rating.has(Rating.doubles)))
+    for i in dupr_ids:
+        print(i)
+
 
 @click.command()
 def get_all_players():
+    dupr_auth()
     get_all_players_from_dupr()
 
 
@@ -210,6 +225,7 @@ def get_all_players():
 @click.argument("dupr_id")
 def get_matches(dupr_id: int):
     """ Get match history for specified player """
+    dupr_auth()
     get_matches_from_dupr(dupr_id)
 
 
@@ -217,12 +233,14 @@ def get_matches(dupr_id: int):
 def get_data():
     """ Update all data """
     logger.info("Getting data from DUPR...")
-
+    dupr_auth()
     get_all_players_from_dupr()
     with Session(eng) as sess:
         for p in sess.execute(select(Player)).scalars():
             print(type(p))
             get_matches_from_dupr(p.dupr_id)
+
+    update_ratings_from_dupr()
 
 
 @click.group()
@@ -239,5 +257,6 @@ if __name__ == "__main__":
     cli.add_command(get_player)
     cli.add_command(delete_player)
     cli.add_command(get_matches)
+    cli.add_command(update_ratings)
     cli.add_command(test_db)
     cli()

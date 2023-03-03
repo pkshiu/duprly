@@ -110,19 +110,43 @@ class Player(Base):
     def __repr__(self) -> str:
         return f"Player {self.full_name} {self.rating}"
 
-    def save(this, sess: Session) -> "Player":
+    @classmethod
+    def get(cls, sess: Session, dupr_id: int) -> "Player":
+        """ Get player by id, or none
+        """
+        p = sess.execute(select(Player).where(
+            Player.dupr_id == dupr_id)).scalar_one_or_none()
+        return p
+
+    @classmethod
+    def save(this, sess: Session, player: "Player") -> "Player":
         """ Insert or update this player
             Deal with child objects
         """
-        p = sess.execute(select(Player).where(
-            Player.dupr_id == this.dupr_id)).scalar_one_or_none()
+        p = Player.get(sess, player.dupr_id)
         if p:
-            # update
+            # update, carefully
+            p.full_name = player.full_name
+            p.first_name = player.first_name
+            p.last_name = player.last_name
+            p.gender = player.gender
+            p.age = player.age
+            p.image_url = player.image_url
+            p.email = player.email
+            p.phone = player.phone
+
+            p.rating.doubles = player.rating.doubles if player.rating.doubles else None
+            p.rating.doubles_verified = player.rating.doubles_verified if player.rating.doubles_verified else None
+            p.rating.is_doubles_provisional = player.rating.is_doubles_provisional
+
+            p.rating.singles = player.rating.singles if player.rating.singles else None
+            p.rating.singles_verified = player.rating.singles_verified if player.rating.singles_verified else None
+            p.rating.is_singles_provisional = player.rating.is_singles_provisional
             sess.add(p)
             return p
         else:
-            sess.add(this)
-            return this
+            sess.add(player)
+            return player
 
     @classmethod
     def from_json(cls, d: dict) -> 'Player':
