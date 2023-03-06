@@ -205,6 +205,9 @@ def update_ratings():
 @click.command()
 def test_db():
     dupr_auth()
+    club_id = os.getenv("DUPR_CLUB_ID")
+    _rc, players = dupr.get_members_by_club(club_id)
+    return
     with Session(eng) as sess:
         # Has to use "has" not "any" because it is 1=1? Also need to have something
         # in the has() function

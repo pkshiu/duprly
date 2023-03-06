@@ -1,27 +1,40 @@
+"""
+    A client to access the unofficial DUPR API.
+    This API seems to be mostly a backend for front end type of API that
+    does not necessarily fit other use.
+
+    There is a automatically generated swagger doc that helps a little
+    but check the data return and project readme for more tips to
+    use this effectively
+
+    https://api.dupr.gg/swagger-ui/index.html
+
+"""
 import os
 import requests
+from requests import Response
 from loguru import logger
 import json
-
-"""
-    see
-    https://api.dupr.gg/swagger-ui/index.html#/Club/getAllMembersUsingPOST
-
-"""
+from typing import Optional
 
 
 class DuprClient(object):
 
-    def __init__(self):
+    def __init__(self, api_url: str = None, api_version: str = None, verbose: bool = False):
         self.env_path = os.path.expanduser('~/.duprly_config')
         logger.debug(self.env_path)
-        self.env_url = 'https://api.dupr.gg'
-        self.version = "v1.0"
-
+        if api_url:
+            self.env_url = api_url
+        else:
+            self.env_url = 'https://api.dupr.gg'
+        if api_version:
+            self.version = api_version
+        else:
+            self.version = "v1.0"
         self.access_token = None
         self.refresh_token = None  # from login
         self.failed = False  # Strange way to return error, for now TBD
-
+        self.verbose = verbose
         self.load_token()
 
     def load_token(self):
@@ -44,17 +57,17 @@ class DuprClient(object):
                 }
                 json.dump(data, f)
         except FileNotFoundError:
-            # TODO: This is the wrong exception to catch!
-            pass
+            logger.debug(f"Cannot save token to {self.env_path}")
 
     def u(self, parts):
+        """ Helper function to construct URL """
         url = f'{self.env_url}{parts}'
-        logger.debug(url)
         return url
 
     def ppj(self, data):
         """ Pretty Print Json for debug """
-        logger.debug(json.dumps(data, indent=4))
+        if self.verbose:
+            logger.debug(json.dumps(data, indent=4))
 
     def save_json_to_file(self, name: str, data: dict):
         """ Save raw json to file for later use """
@@ -64,35 +77,26 @@ class DuprClient(object):
     def load_json_from_file(self, name: str) -> dict:
         """
             Load previously saved json from file.
-            Now return Marshmallow'ed json...
-
-            Note that because our API returns a list of objects sometimes,
-            and just one large objects other time, we need to
-            convert it differently via Marshmallow
         """
         with open(f"{name}.json", 'r') as f:
-            jdata = json.load(f)
-            try:
-                many = type(jdata) == list
-                data = self.schemas[name].load(jdata, many=many)
-            except ValidationError as error:
-                logger.error(error.messages)
-                logger.error(error.field_name)
+            data = json.load(f)
             return data
 
-    def auth_user(self, username: str, password: str):
+    def auth_user(self, username: str, password: str) -> int:
         """ This is the external callable auth method.
-            It handles a saved refresh_token, no need to re-login, or
-            login and refresh
+            It handles a saved access token, no need to re-login, or
+            login and save token for next time.
+
+            This API curently just use an access token.
+            Not oauth style access/refresh token set.
         """
         if self.access_token:
-            return
-            # test for specific error code?
+            return 0
         else:
             rc = self.login_user(username, password)
             return rc
 
-    def login_user(self, username: str, password: str):
+    def login_user(self, username: str, password: str) -> int:
         """ Low level just do login (will need refresh after) """
         body = {
             'email': username,
@@ -115,56 +119,41 @@ class DuprClient(object):
             'Authorization': f'Bearer {self.access_token}'
         }
 
-    def refresh_user(self):
-        body = {
-            'token': self.refresh_token
-        }
-        logger.debug("refresh user:")
-        r = requests.post(self.u('/user/token/refresh/'), json=body)
-        logger.debug(f'refresh user: {r.status_code}')
-        if r.status_code == 200:
-            self.access_token = r.json().get('token')
-            logger.debug(f'access token: {self.access_token[:10]}...')
-        return r.status_code
-
-    def dupr_get(self, url, name: str = ""):
+    def dupr_get(self, url, name: str = "") -> Response:
         logger.debug(f'GET: {name} : {url}')
-        r = requests.get(self.u(url), headers=self.headers())  # , params=data)
+        r = requests.get(self.u(url), headers=self.headers())
         logger.debug(f'return: {r.status_code}')
         if r.status_code == 403:
             rc = self.refresh_user()
             if rc == 200:
                 logger.debug(f'GET: {url}')
-                r = requests.get(self.u(url), headers=self.headers())  # , params=data)
+                r = requests.get(self.u(url), headers=self.headers())
                 logger.debug(f'return: {r.status_code}')
         self.failed = r.status_code != 200
         return r
 
-    def dupr_post(self, url, json_data=None, name: str = ""):
+    def dupr_post(self, url, json_data=None, name: str = "") -> Response:
         logger.debug(f'POST: {name} : {url}')
         headers = self.headers()
-#         headers["Content-Type"] = "application/json"
-#         headers["origin"] = "https://mydupr.com"
-#        headers["referer"] = "https://mydupr.com/"
-
         r = requests.post(self.u(url), headers=headers,  json=json_data)
         logger.debug(f'return: {r.status_code}')
-        if r.status_code == 4031:
+        if r.status_code == 403:
             rc = self.refresh_user()
             if rc == 200:
                 logger.debug(f'POST: {url}')
-                r = requests.post(self.u(url), headers=self.headers())  # , params=data)
+                r = requests.post(self.u(url), headers=self.headers())
                 logger.debug(f'return: {r.status_code}')
         self.failed = r.status_code != 200
         return r
 
-    def get_profile(self):
+    def get_profile(self) -> tuple[int, dict]:
         r = self.dupr_get(f'/user/{self.version}/profile/', "get_profile")
         if r.status_code == 200:
             self.ppj(r.json())
-        return r.status_code
+            return r.status_code, r.json()["result"]
+        return r.status_code, None
 
-    def get_player(self, player_id: str):
+    def get_player(self, player_id: str) -> tuple[int, Optional[dict]]:
         r = self.dupr_get(f'/player/{self.version}/{player_id}', "get_player")
         if r.status_code == 200:
             self.ppj(r.json())
@@ -178,7 +167,7 @@ class DuprClient(object):
             self.ppj(r.json())
         return r.status_code
 
-    def get_member_match_history_p(self, member_id: str):
+    def get_member_match_history_p(self, member_id: str) -> tuple[int, list]:
         page_data = {
             "filters": {},
             "sort": {
@@ -201,7 +190,7 @@ class DuprClient(object):
         self.ppj(page_data)
         return r.status_code, hit_data
 
-    def get_member_match_history(self, member_id: str):
+    def get_member_match_history(self, member_id: str) -> tuple[int, list]:
         offset = 0
         hit_data = []
         while offset is not None:
@@ -217,7 +206,7 @@ class DuprClient(object):
         """
         Handle results that are paged.
         use like this:
-        
+
             while offset is not None:
                 dupr_get
                 offset, hits = handle_paging(response.json())
@@ -241,10 +230,6 @@ class DuprClient(object):
         data = {
             "exclude": [],
             "limit": 20,
-            "filter": {
-                "lat": 42.4609077,
-                "lng": -71.2220832
-                },
             "offset": 0,
             "query": "*"
             }
@@ -254,10 +239,8 @@ class DuprClient(object):
             data["offset"] = offset
             r = self.dupr_post(f'/club/{club_id}/members/v1.0/all', json_data=data, name="get_member_by_club")
             if r.status_code == 200:
-                # self.ppj(r.json())
+                self.ppj(r.json())
                 offset, hits = self.handle_paging(r.json())
-                logger.debug(f'offset: {offset}')
                 pdata.extend(hits)
 
-        self.ppj(pdata)
         return r.status_code, pdata

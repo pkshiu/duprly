@@ -1,7 +1,9 @@
 set dotenv-load := true
 DB_PATH := "dupr.sqlite"
 
-
+stats:
+	python duprly.py stats
+	
 data:
 	python duprly.py get-data
 
@@ -23,14 +25,5 @@ player_view:
 move_db:
 	- mv dupr.sqlite dupr_`date +%Y%m%d_%H%M`.sqlite
 
-qtest_1:
-	python duprly.py get-player 6493661183
-	python duprly.py get-player 6335922641
-	python duprly.py get-player 6923845911
-	python duprly.py get-matches 6493661183
-	python duprly.py update-ratings
-	python duprly.py update-ratings
-
-qtest: move_db qtest_1 web
 
 

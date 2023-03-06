@@ -2,7 +2,6 @@
     Relational representation of DUPR Data
 """
 from datetime import date
-from operator import attrgetter
 from typing import List, Optional
 from loguru import logger
 from sqlalchemy import create_engine
@@ -43,7 +42,8 @@ def _cv_rating_json(s: str):
     # deal with NR vs 3.45
     if s is None:
         return None
-    if s == "NR": return None
+    if s == "NR":
+        return None
     return float(s)
 
 
