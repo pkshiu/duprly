@@ -47,3 +47,15 @@ result = session.execute(
 ...     select(User.name, Address.email_address)
 ...     .join(User.addresses)
 ...     .order_by(User.id, Address.id)
+
+## M-1 Foreign Key
+
+- in the child, store a FK field, but also
+- declare a relationship field that is for object level reference
+
+'''
+class Rating(Base):
+    ...
+    player_id: Mapped[int] = mapped_column(ForeignKey("player.id"))
+    player: Mapped["Player"] = relationship(back_populates="rating")
+'''

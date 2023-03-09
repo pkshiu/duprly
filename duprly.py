@@ -86,6 +86,14 @@ def get_matches_from_dupr(dupr_id: int):
                         plist.append(p1)
                         print(f"use existing populated player")
                     else:
+                        # We need to handle a strange case where the same player
+                        # enter himself/herself twice on a doubles team.
+                        # If we just add both "new limited (but same)" team members
+                        # SQLA seems to happily add both?
+                        # so check to see if p already has been added:
+                        if len(plist) > 0 and plist[0].dupr_id == p.dupr_id:
+                            logger.warning(f"same player on doubles team {p.dupr_id} {m.match_id}")
+                            continue
                         plist.append(p)
                         print(f"saved new limited data player")
                 team.players = plist
@@ -240,7 +248,6 @@ def get_data():
     get_all_players_from_dupr()
     with Session(eng) as sess:
         for p in sess.execute(select(Player)).scalars():
-            print(type(p))
             get_matches_from_dupr(p.dupr_id)
 
     update_ratings_from_dupr()

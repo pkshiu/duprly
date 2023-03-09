@@ -282,3 +282,31 @@ class MatchTeam(Base):
         except:
             logger.exception(d)
             raise
+
+
+class MatchDetail(Base):
+    """
+    A denormalized table for match and players because this is the primary
+    query that is useful.
+    """
+
+    __tablename__ = "match_detail"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    match_id: Mapped[int] = mapped_column(ForeignKey("match.id"))
+    match: Mapped["Match"] = relationship()
+    # team 1 is the winning team
+    team_1_score: Mapped[int] = mapped_column()
+    team_2_score: Mapped[int] = mapped_column()
+
+    team_1_player_1_id: Mapped[int] = mapped_column(ForeignKey("player.id"))
+
+
+    def __repr__(self) -> str:
+        return f"Match {self.name} on {self.date}"
+
+    @classmethod
+    def get_by_id(cls, sess: Session, match_id: int) -> "Match":
+        m = sess.execute(select(Match).where(
+            Match.match_id == match_id)).scalar_one_or_none()
+        return m
