@@ -5,9 +5,9 @@ import json
 from dupr_client import DuprClient
 from openpyxl import Workbook
 from dotenv import load_dotenv
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.orm import Session
-from dupr_db import open_db, Base, Player, Match, MatchTeam, Rating
+from dupr_db import open_db, Base, Player, Match, MatchTeam, Rating, MatchDetail
 
 load_dotenv()
 dupr = DuprClient()
@@ -111,6 +111,30 @@ def update_ratings_from_dupr():
 
     for i in dupr_ids:
         get_player_from_dupr(i)
+
+
+@click.command()
+def build_match_detail():
+    """ Flatten match data for faster query """
+    with Session(eng) as sess:
+        sess.execute(delete(MatchDetail))
+        matches = sess.scalars(select(Match))
+        for match in matches:
+            print(match)
+            md = MatchDetail()
+            md.match = match
+            t1 = match.teams[0]
+            md.team_1_score = t1.score1
+            md.team_1_player_1_id = t1.players[0].id
+            if len(t1.players) > 1:
+                md.team_1_player_2_id = t1.players[1].id
+            t2 = match.teams[1]
+            md.team_2_score = t2.score1
+            md.team_2_player_1_id = t2.players[0].id
+            if len(t2.players) > 1:
+                md.team_2_player_2_id = t2.players[1].id
+            sess.add(md)
+            sess.commit()
 
 
 def match_row(m: Match) -> tuple:
@@ -268,5 +292,6 @@ if __name__ == "__main__":
     cli.add_command(delete_player)
     cli.add_command(get_matches)
     cli.add_command(update_ratings)
+    cli.add_command(build_match_detail)
     cli.add_command(test_db)
     cli()

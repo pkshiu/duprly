@@ -69,6 +69,40 @@ order by m.date
 match_detail_view:
 	sqlite-utils create-view --replace {{DB_PATH}} match_detail_view "{{v3}}"
 
+v4 := '''
+select
+  m.name,
+  m.date,
+  team_1_score,
+  p1.full_name,
+  r1.doubles,
+  p2.full_name,
+  r2.doubles,
+  team_2_score,
+  p3.full_name,
+  r3.doubles,
+  p4.full_name,
+  r4.doubles
+from
+  match_detail as mt,
+  match as m
+  left join player as p1 on p1.id = team_1_player_1_id
+  left join player as p2 on p2.id = team_1_player_2_id
+  left join player as p3 on p3.id = team_2_player_1_id
+  left join player as p4 on p4.id = team_2_player_2_id
+  left join rating as r1 on r1.id = team_1_player_1_id
+  left join rating as r2 on r2.id = team_1_player_2_id
+  left join rating as r3 on r3.id = team_2_player_1_id
+  left join rating as r4 on r4.id = team_2_player_2_id
+where
+  mt.match_id = m.id
+order by
+  m.date
+'''
+match_report_view:
+	sqlite-utils create-view --replace {{DB_PATH}} match_report_view "{{v4}}"
+
+
 move_db:
 	- mv dupr.sqlite dupr_`date +%Y%m%d_%H%M`.sqlite
 

@@ -300,7 +300,9 @@ class MatchDetail(Base):
     team_2_score: Mapped[int] = mapped_column()
 
     team_1_player_1_id: Mapped[int] = mapped_column(ForeignKey("player.id"))
-
+    team_1_player_2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("player.id"))
+    team_2_player_1_id: Mapped[int] = mapped_column(ForeignKey("player.id"))
+    team_2_player_2_id: Mapped[Optional[int]] = mapped_column(ForeignKey("player.id"))
 
     def __repr__(self) -> str:
         return f"Match {self.name} on {self.date}"
